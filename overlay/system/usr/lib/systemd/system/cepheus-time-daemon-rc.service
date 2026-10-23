@@ -1,0 +1,18 @@
+[Unit]
+Description=Keep Qualcomm time_daemon from resetting the clock to the RTC (1970)
+Documentation=file:///etc/cepheus/init.time_daemon.rc
+DefaultDependencies=no
+After=mount-android-partitions.service halium-android-partitions.service
+Before=lxc-android-config.service
+ConditionPathExists=/var/lib/lxc/android/rootfs/vendor/etc/init/init.time_daemon.rc
+ConditionPathExists=/etc/cepheus/init.time_daemon.rc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# init skips group/other-writable rc files: keep the source root:root 0644.
+ExecStart=/bin/mount --bind /etc/cepheus/init.time_daemon.rc /var/lib/lxc/android/rootfs/vendor/etc/init/init.time_daemon.rc
+ExecStop=-/bin/umount /var/lib/lxc/android/rootfs/vendor/etc/init/init.time_daemon.rc
+
+[Install]
+WantedBy=sysinit.target

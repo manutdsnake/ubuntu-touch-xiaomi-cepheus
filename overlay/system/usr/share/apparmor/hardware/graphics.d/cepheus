@@ -1,0 +1,19 @@
+# cepheus: sysfs nodes the GPU/CPU probing in libhybris, Mir and Qt read on
+# this SoC.  With AppArmor enforcing, confined click apps were denied these:
+#
+#   apparmor="DENIED" operation="open" profile="camera.ubports_camera_4.1.1"
+#       name="/sys/devices/platform/soc/2c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/gpu_model"
+#       name="/sys/devices/system/cpu/cpu0/cpu_capacity"
+#       name="/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq"
+#       name="/sys/devices/system/cpu/present"
+#
+# This directory is the mechanism apparmor-easyprof-ubuntu provides for exactly
+# that: every file here is folded into the "graphics" hardware policy of every
+# app profile.  The rootfs ships only a placeholder meant to be replaced by the
+# Android device tarball, which this port never did.  Read-only, and nothing
+# outside sysfs.  Regenerate profiles after changing this (click-apparmor).
+/sys/devices/platform/soc/2c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/ r,
+/sys/devices/platform/soc/2c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/* r,
+/sys/devices/system/cpu/present r,
+/sys/devices/system/cpu/cpu[0-9]*/cpu_capacity r,
+/sys/devices/system/cpu/cpufreq/policy[0-9]*/cpuinfo_max_freq r,

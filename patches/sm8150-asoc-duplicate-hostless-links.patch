@@ -1,0 +1,21 @@
+diff --git a/techpack/audio/asoc/sm8150.c b/techpack/audio/asoc/sm8150.c
+index 634b2da74..bfca2a0b9 100644
+--- a/techpack/audio/asoc/sm8150.c
++++ b/techpack/audio/asoc/sm8150.c
+@@ -6201,7 +6201,15 @@ static struct snd_soc_dai_link msm_common_misc_fe_dai_links[] = {
+ 		.ignore_pmdown_time = 1,
+ 		.id = MSM_FRONTEND_DAI_MULTIMEDIA17,
+ 	},
+-#ifdef CONFIG_MACH_XIAOMI_SM8150
++/*
++ * These two also exist below under the complementary guard.  Building for
++ * anything that is CONFIG_MACH_XIAOMI_SM8150 but neither vayu nor nabu -
++ * cepheus, for one - compiles both copies into the same array, and the card
++ * then dies with "cannot create duplicate filename ... Quaternary MI2S_RX
++ * Hostless Playback" and -EEXIST.  Guard this copy on exactly the devices the
++ * one below excludes.
++ */
++#if defined(CONFIG_MACH_XIAOMI_VAYU) || defined(CONFIG_MACH_XIAOMI_NABU)
+ 	{
+ 		.name = "Quaternary MI2S_RX Hostless Playback",
+ 		.stream_name = "Quaternary MI2S_RX Hostless Playback",

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Test hardvera
+Comment=Hardware test for the Mi 9 port
+Exec=qmlscene /home/phablet/.local/share/cepheus-test/main.qml
+Icon=/home/phablet/.local/share/cepheus-test/icon.svg
+Terminal=false
+Type=Application
+X-Lomiri-Touch=true
+X-Lomiri-Supported-Orientations=portrait

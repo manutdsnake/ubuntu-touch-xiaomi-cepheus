@@ -1,0 +1,98 @@
+#!/bin/sh
+# Elliptic ultrasound proximity: run Xiaomi's 32-bit audio HAL next to
+# PulseAudio and hold its primary output open - and keep the two in boot order.
+#
+# The proximity sensor (sensors.elliptic.so) asks libultrasound -> the HAL's
+# /dev/socket/audio_hw_socket to start the ultrasound usecase; only the 32-bit
+# HAL (vendor.audio-hal) serves that socket, and it answers only once a primary
+# output exists (AudioFlinger's job on Android, absent here).
+#
+# Order matters: the voice calibration blocks can be allocated once, so the
+# HAL must start after PulseAudio's in-process 64-bit HAL took them
+# (cepheus-stop-android-audio stops it at boot).  Whenever that order breaks -
+# the HAL died and init restarted it (seen right after a USB unplug), or
+# PulseAudio aborted and came back second (it takes SIGBUS when this helper's
+# output closes) - calls have no microphone until reboot, and the user cannot
+# see why.  So watch both, and on any restart redo the boot order: stop
+# PulseAudio and the HAL, start PulseAudio, then the HAL and the output.
+A="lxc-attach -n android --"
+U="systemctl --machine=phablet@ --user"
+HELPER=/usr/lib/cepheus/cepheus-hidl-primary-out
+
+hal_state() { $A /system/bin/getprop init.svc.vendor.audio-hal; }
+hal_ticks() { [ -n "$1" ] && awk '{print $14 + $15}' "/proc/$1/stat" 2>/dev/null || echo 0; }
+us_open() { ! grep -q closed /proc/asound/card0/pcm36p/sub0/status 2>/dev/null; }
+# Seconds since the HAL process started: it loads ACDB for ~15 s at full CPU,
+# which is not a spin.
+hal_age() { [ -n "$1" ] && awk -v hz="$(getconf CLK_TCK)" -v up="$(cut -d. -f1 /proc/uptime)" \
+    '{print up - int($22 / hz)}' "/proc/$1/stat" 2>/dev/null || echo 0; }
+hal_pid() { pgrep -f '^/vendor/bin/hw/android.hardware.audio.service' | head -1; }
+pa_pid() { pgrep -u 32011 -x pulseaudio | head -1; }
+started() { [ -n "$1" ] && awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
+
+wait_pa() {
+    until [ -n "$(pa_pid)" ]; do sleep 2; done
+    sleep 5
+}
+
+start_hal() {
+    [ "$(hal_state)" = running ] || $A /system/bin/setprop ctl.start vendor.audio-hal
+    i=0
+    until [ "$(hal_state)" = running ]; do
+        i=$((i + 1)); [ $i -gt 30 ] && { echo "vendor.audio-hal did not start"; exit 1; }
+        sleep 1
+    done
+    sleep 3
+}
+
+reorder() {
+    echo "audio restart detected ($1): restarting PulseAudio and the HAL in boot order"
+    $U stop pulseaudio.socket pulseaudio.service
+    [ -n "$hp" ] && kill "$hp" 2>/dev/null
+    $A /system/bin/setprop ctl.stop vendor.audio-hal
+    i=0
+    while [ "$(hal_state)" = running ] && [ $i -lt 20 ]; do i=$((i + 1)); sleep 1; done
+    sleep 2
+    $U start pulseaudio.socket pulseaudio.service
+    wait_pa
+    # The sound indicator does not reconnect to a restarted PulseAudio: its
+    # slider and the volume keys would change nothing until it restarts.
+    $U try-restart ayatana-indicator-sound.service
+}
+
+hp=
+trap '[ -n "$hp" ] && kill "$hp" 2>/dev/null; exit 0' TERM INT
+wait_pa
+# Coming up with the HAL already running but older than PulseAudio means
+# PulseAudio restarted behind it.
+h=$(hal_pid); p=$(pa_pid)
+if [ -n "$h" ] && [ "$(started "$p")" -gt "$(started "$h")" ]; then
+    reorder "PulseAudio newer than the HAL"
+fi
+while :; do
+    start_hal
+    p=$(pa_pid)
+    $HELPER AUDIO_DEVICE_OUT_SPEAKER &
+    hp=$!
+    why=
+    h=$(hal_pid); t0=$(hal_ticks "$h"); busy=0
+    while [ -z "$why" ]; do
+        sleep 3
+        kill -0 "$hp" 2>/dev/null || { wait "$hp"; rc=$?; why="helper exited $rc"; }
+        [ "$(pa_pid)" = "$p" ] || why="PulseAudio restarted"
+        # After some charger/USB events the HAL spins a binder thread at 100%
+        # CPU for good (not the battery listener - that is disabled; cause
+        # unknown): calls stutter, the ringing screen stays dark, SMS lag.
+        # 3 s = 300 ticks; >80% for three checks with no ultrasound session.
+        t1=$(hal_ticks "$h")
+        if [ $((t1 - t0)) -gt 240 ] && ! us_open && [ "$(hal_age "$h")" -gt 60 ]; then
+            busy=$((busy + 1))
+        else
+            busy=0
+        fi
+        t0=$t1
+        [ $busy -ge 3 ] && why="HAL spinning at 100% CPU"
+    done
+    reorder "$why"
+    hp=
+done

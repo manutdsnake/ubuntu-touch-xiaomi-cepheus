@@ -1,0 +1,119 @@
+#!/usr/bin/python3
+# Under-display fingerprint glue for cepheus.
+#
+# On Android the pieces are wired by SystemUI and SurfaceFlinger: SystemUI
+# shows the sensor spot, SurfaceFlinger commits it at the FOD z-order, the
+# kernel then raises panel HBM and fod_ui, and the fingerprint HAL (watching
+# fod_ui) switches the sensor to FOD mode.  On Ubuntu Touch none of that
+# exists, so this daemon does it:
+#
+#   biometryd writes /run/biometryd/udfps-active (1 while the HAL waits for a
+#   finger - patches/biometryd-udfps-active-state.patch)
+#     -> arm the touch controller's FOD detection (/sys/touchpanel/fod_status)
+#   touch controller reports BTN_INFO when a finger rests on the sensor area
+#     -> repowerd setHighBrightnessModeEnabled(true): Lomiri draws the white
+#        spot (UDFPSDimmer) and repowerd writes HBMSysfsPath (the kernel's
+#        fod_hbm node: panel FOD HBM + fod_ui=1, which the HAL picks up)
+#   finger lifted / operation over -> undo.
+import glob
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+
+STATE = "/run/biometryd/udfps-active"
+FOD_STATUS = "/sys/touchpanel/fod_status"
+FOD_HBM = "/sys/devices/platform/soc/soc:qcom,dsi-display-primary/fod_hbm"
+EV_KEY, BTN_INFO = 0x01, 0x166
+EVENT = struct.Struct("llHHi")
+
+
+def log(*a):
+    print(*a, flush=True)
+
+
+def write(path, value):
+    try:
+        with open(path, "w") as f:
+            f.write(value)
+    except OSError as e:
+        log("write", path, e)
+
+
+def touch_device():
+    for d in glob.glob("/sys/class/input/event*"):
+        try:
+            if open(d + "/device/name").read().strip() == "fts":
+                return "/dev/input/" + os.path.basename(d)
+        except OSError:
+            pass
+    return None
+
+
+def hbm(on):
+    # repowerd both draws (via Lomiri's HighBrightnessModeChange) and writes
+    # fod_hbm; it also switches HBM off by itself after 5 s.
+    r = subprocess.run(
+        ["gdbus", "call", "--system", "--dest", "com.canonical.Unity.Screen",
+         "--object-path", "/com/canonical/Unity/Screen",
+         "--method", "com.canonical.Unity.Screen.setHighBrightnessModeEnabled",
+         "true" if on else "false"],
+        capture_output=True, text=True)
+    if r.returncode:
+        log("repowerd:", r.stderr.strip())
+        write(FOD_HBM, "1" if on else "0")
+
+
+def active():
+    try:
+        return open(STATE).read().strip() == "1"
+    except OSError:
+        return False
+
+
+def main():
+    dev = None
+    while dev is None:
+        dev = touch_device()
+        if dev is None:
+            time.sleep(2)
+    fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+    log("touch", dev)
+
+    armed = pressed = False
+    write(FOD_STATUS, "0")
+    while True:
+        want = active()
+        if want != armed:
+            armed = want
+            write(FOD_STATUS, "1" if armed else "0")
+            log("armed" if armed else "disarmed")
+            if not armed and pressed:
+                pressed = False
+                hbm(False)
+
+        r, _, _ = select.select([fd], [], [], 0.25)
+        if not r:
+            continue
+        try:
+            data = os.read(fd, EVENT.size * 64)
+        except BlockingIOError:
+            continue
+        for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
+            _, _, typ, code, value = EVENT.unpack_from(data, i)
+            if typ != EV_KEY or code != BTN_INFO or not armed:
+                continue
+            if value and not pressed:
+                pressed = True
+                log("finger down")
+                hbm(True)
+            elif not value and pressed:
+                pressed = False
+                log("finger up")
+                hbm(False)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Take the dead WLED backlight out of repowerd's way.
+#
+# This phone exposes two backlight devices:
+#   backlight         qcom-spmi-wled, the PMIC's LED backlight driver
+#   panel0-backlight  msm_drm, the one that actually lights the panel
+#
+# The panel is AMOLED, so the WLED device controls nothing at all, but repowerd
+# scans /sys/class/backlight and settles on it - alphabetically first. The
+# result is a brightness slider that moves, a value that really changes, and a
+# screen that never responds. Unbinding the WLED driver leaves repowerd only the
+# real device. The flash/torch LEDs belong to a different driver and are
+# unaffected - verified on the device.
+DRV=/sys/bus/platform/drivers/qcom-spmi-wled
+
+[ -d "$DRV" ] || exit 0
+for d in "$DRV"/*; do
+    case "${d##*/}" in
+        bind|unbind|uevent|module) continue ;;
+    esac
+    [ -e "$d/backlight" ] || continue
+    echo "${d##*/}" > "$DRV/unbind" 2>/dev/null && echo "unbound ${d##*/}"
+done
+ls /sys/class/backlight/

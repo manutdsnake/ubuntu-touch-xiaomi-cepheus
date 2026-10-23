@@ -1,0 +1,18 @@
+[Unit]
+Description=USB debug console (and adb) for the cepheus port
+# Runs before the session and keeps running: the container's usb HAL takes the
+# controller when it starts, so this has to hold it rather than set it once.
+DefaultDependencies=no
+After=systemd-remount-fs.service local-fs.target
+Before=sysinit.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=exec
+Restart=always
+RestartSec=30
+ExecStart=/usr/libexec/cepheus-adb-gadget
+
+[Install]
+WantedBy=sysinit.target

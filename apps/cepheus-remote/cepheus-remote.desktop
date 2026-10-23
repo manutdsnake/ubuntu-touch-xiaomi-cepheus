@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=TV daljinski
+Comment=IR remote for TVs (Mi 9 IR blaster)
+Exec=qmlscene /home/phablet/.local/share/cepheus-remote/main.qml
+Icon=/home/phablet/.local/share/cepheus-remote/icon.svg
+Terminal=false
+Type=Application
+X-Lomiri-Touch=true

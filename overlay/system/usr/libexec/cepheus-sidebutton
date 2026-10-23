@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""The Mi 9's left-side "AI" button: single / double / long press actions.
+
+The button is key 689 on gpio-keys (next to volume up); nothing else on
+Ubuntu Touch uses it.  Each gesture runs what System Settings > Side button
+stored in ~phablet/.config/cepheus/sidebutton.json (re-read on every press):
+
+    "none"                  do nothing
+    "torch"                 toggle the flashlight (the power indicator's action)
+    "app:<package_app>"     launch an app; click versions are resolved at press
+                            time, so updates do not break the setting
+
+Runs as root to read the input node; actions run in phablet's session.
+"""
+import glob, json, os, select, struct, subprocess, sys, time
+
+KEY = 689
+LONG_S = 0.6      # held this long: long press, fired while still held
+DOUBLE_S = 0.35   # second press within this: double press
+USER = "phablet"
+UID = 32011
+CONFIG = "/home/phablet/.config/cepheus/sidebutton.json"
+DEFAULTS = {"single": "none", "double": "app:camera.ubports_camera", "long": "torch"}
+EV_FMT = "llHHi"
+EV_SIZE = struct.calcsize(EV_FMT)
+
+
+def log(msg):
+    print("cepheus-sidebutton: " + msg, file=sys.stderr, flush=True)
+
+
+def find_device():
+    for d in sorted(glob.glob("/sys/class/input/event*")):
+        try:
+            if open(d + "/device/name").read().strip() == "gpio-keys":
+                return "/dev/input/" + os.path.basename(d)
+        except OSError:
+            pass
+    return None
+
+
+def config():
+    cfg = dict(DEFAULTS)
+    try:
+        with open(CONFIG) as f:
+            cfg.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
+    except (OSError, ValueError):
+        pass
+    return cfg
+
+
+def session(cmd):
+    env = ["XDG_RUNTIME_DIR=/run/user/%d" % UID,
+           "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%d/bus" % UID]
+    return subprocess.run(["runuser", "-u", USER, "--", "env"] + env + cmd,
+                          capture_output=True, text=True, timeout=10)
+
+
+def torch():
+    g = ["gdbus", "call", "--session", "--dest", "org.ayatana.indicator.power",
+         "--object-path", "/org/ayatana/indicator/power", "--method"]
+    state = session(g + ["org.gtk.Actions.Describe", "flashlight"]).stdout
+    on = "<true>" not in state
+    session(g + ["org.gtk.Actions.Activate", "flashlight",
+                 "[<%s>]" % ("true" if on else "false"), "{}"])
+    log("torch %s" % ("on" if on else "off"))
+
+
+def launch(app):
+    # "camera.ubports_camera" matches the installed "camera.ubports_camera_4.1.1"
+    ids = session(["lomiri-app-launch-appids"]).stdout.split()
+    full = next((i for i in ids if i == app or i.startswith(app + "_")), None)
+    if not full:
+        log("app %s is not installed" % app)
+        return
+    subprocess.Popen(["runuser", "-u", USER, "--", "env",
+                      "XDG_RUNTIME_DIR=/run/user/%d" % UID,
+                      "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%d/bus" % UID,
+                      "lomiri-app-launch", full],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log("launched %s" % full)
+
+
+def run(gesture):
+    action = config().get(gesture, "none")
+    log("%s press -> %s" % (gesture, action))
+    try:
+        if action == "torch":
+            torch()
+        elif action.startswith("app:"):
+            launch(action[4:])
+    except Exception as e:
+        log("%s failed: %s" % (action, e))
+
+
+def main():
+    dev = find_device()
+    if not dev:
+        log("gpio-keys not found")
+        return 1
+    fd = os.open(dev, os.O_RDONLY)
+    log("watching %s key %d" % (dev, KEY))
+    down_at = None      # time of the current press
+    long_done = False   # long press already fired for the current press
+    pending = None      # time of a released single press waiting for a second
+    while True:
+        now = time.monotonic()
+        timeouts = []
+        if down_at is not None and not long_done:
+            timeouts.append(down_at + LONG_S - now)
+        if pending is not None:
+            timeouts.append(pending + DOUBLE_S - now)
+        r, _, _ = select.select([fd], [], [], max(0, min(timeouts)) if timeouts else None)
+        now = time.monotonic()
+        if r:
+            data = os.read(fd, EV_SIZE * 16)
+            for i in range(0, len(data) - EV_SIZE + 1, EV_SIZE):
+                _, _, typ, code, value = struct.unpack(EV_FMT, data[i:i + EV_SIZE])
+                if typ != 1 or code != KEY or value == 2:
+                    continue
+                if value == 1:
+                    down_at, long_done = now, False
+                    if pending is not None:          # second press: double
+                        pending = None
+                        long_done = True             # no long press on it either
+                        run("double")
+                elif down_at is not None:
+                    if not long_done:
+                        if config()["double"] == "none":
+                            run("single")            # nothing to wait for
+                        else:
+                            pending = now
+                    down_at = None
+        if down_at is not None and not long_done and now - down_at >= LONG_S:
+            long_done = True
+            run("long")
+        if pending is not None and now - pending >= DOUBLE_S:
+            pending = None
+            run("single")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

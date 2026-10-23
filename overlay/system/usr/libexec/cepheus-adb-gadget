@@ -1,0 +1,149 @@
+#!/bin/sh
+# Give the port a debug console over USB, independently of usb-moded.
+#
+# usb-moded does not come up here, so the cable is completely dead, and
+# lomiri-system-settings hides the Developer Mode entry unless usb-moded answers
+# get_modes with a "*_adb" mode - the switch that would turn adb on is missing
+# exactly when it is needed.  Worse, the userspace is slow enough that waiting
+# for it is not an option, so this runs before sysinit.target and gives us a
+# root shell on CDC ACM that survives whatever the rest of the session does.
+#
+# The initramfs panic shell proves configfs works on this device, so configfs is
+# the primary path; android_usb exists too but is only a fallback.
+exec 2>&1
+
+ANDROID_USB=/sys/class/android_usb/android0
+CFG=/sys/kernel/config
+G="$CFG/usb_gadget/cepheus"
+
+start_console() {
+    for _ in 1 2 3 4 5; do
+        [ -c /dev/ttyGS0 ] && break
+        sleep 1
+    done
+    [ -c /dev/ttyGS0 ] || { echo "no /dev/ttyGS0"; return 1; }
+    # Autologin: the point of this console is to be reachable when the session
+    # that would let anyone type a password is the thing that is broken.
+    systemd-run --collect --unit=cepheus-console \
+        /sbin/agetty --autologin root --noclear ttyGS0 115200 vt102
+}
+
+grep -q " $CFG configfs " /proc/mounts || mount -t configfs none "$CFG" 2>/dev/null
+
+# Fallback only.  Since usb-moded follows the pc_port supply and the pdphy
+# extcon (/etc/usb-moded/95-cepheus-cable.ini) it brings up MTP and adb by
+# itself, and this gadget must not steal the controller from it.  Wait for
+# usb-moded to bind its gadget; take over only if nobody holds the UDC - a
+# boot that broke before usb-moded is exactly when the console is needed.
+owner_bound() {
+    for u in "$CFG"/usb_gadget/*/UDC; do
+        [ "$u" = "$G/UDC" ] && continue
+        [ -n "$(cat "$u" 2>/dev/null)" ] && return 0
+    done
+    return 1
+}
+wait_s=0
+while [ $wait_s -lt 90 ]; do
+    owner_bound && break
+    sleep 5; wait_s=$((wait_s + 5))
+done
+if owner_bound; then
+    echo "usb-moded owns USB; standing by as fallback"
+    idle=0
+    while :; do
+        sleep 30
+        if owner_bound; then idle=0; else idle=$((idle + 1)); fi
+        # two empty checks in a row: nobody serves the cable, take over
+        [ $idle -ge 2 ] && break
+    done
+    echo "no USB gadget bound for a minute; taking over"
+fi
+
+if [ ! -d "$CFG/usb_gadget" ]; then
+    echo "no configfs gadget support; leaving the cable alone"
+    exit 0
+fi
+
+# Take the controller rather than stand aside.  Once sys.boot_completed is set
+# the Android container's usb HAL configures a gadget of its own, which offers
+# the host nothing we can use and leaves the cable looking dead - and standing
+# aside there costs us the only way into the device.  Anything already bound
+# gets unbound first; on a port under development the debug console wins.
+if [ -w "$ANDROID_USB/enable" ] && [ "$(cat "$ANDROID_USB/enable" 2>/dev/null)" = "1" ]; then
+    echo "android_usb was enabled as $(cat "$ANDROID_USB/functions" 2>/dev/null); taking it over"
+    echo 0 > "$ANDROID_USB/enable" 2>/dev/null
+fi
+
+for g in "$CFG"/usb_gadget/*; do
+    [ -d "$g" ] || continue
+    [ "$g" = "$G" ] && continue
+    if [ -n "$(cat "$g/UDC" 2>/dev/null)" ]; then
+        echo "unbinding $g, which held the controller"
+        echo "" > "$g/UDC" 2>/dev/null
+    fi
+done
+
+mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409"
+# A service restart may find our own gadget still bound. Unbind it before
+# changing descriptors or functions; configfs rejects edits while active.
+[ -n "$(cat "$G/UDC" 2>/dev/null)" ] && echo "" > "$G/UDC"
+echo 0x18d1 > "$G/idVendor"
+echo 0xd002 > "$G/idProduct"
+echo cepheus > "$G/strings/0x409/serialnumber"
+echo Xiaomi  > "$G/strings/0x409/manufacturer"
+echo "Mi 9"  > "$G/strings/0x409/product"
+echo "debug console" > "$G/configs/c.1/strings/0x409/configuration"
+
+mkdir -p "$G/functions/acm.GS0"
+ln -sf "$G/functions/acm.GS0" "$G/configs/c.1/acm.GS0"
+
+# USB networking too (CDC NCM, phone 172.16.42.1, host 172.16.42.2 - the same
+# addresses postmarketOS uses, so the host's existing NM profile picks it up).
+# SSH over the cable needs no WiFi, which is gone after every userdata wipe.
+mkdir -p "$G/functions/ncm.usb0" && ln -sf "$G/functions/ncm.usb0" "$G/configs/c.1/ncm.usb0"
+
+# No adb here: functionfs instance names are global, and holding "adb" made
+# usb-moded's adbd-prepare.service fail ("ffs.adb: Device or resource busy")
+# when Developer Mode is switched on.  adb never came up through this gadget
+# anyway; the console and the NCM link are what this is for.
+adb_ok=0
+[ -e "$G/configs/c.1/ffs.adb" ] && rm -f "$G/configs/c.1/ffs.adb"
+[ -d "$G/functions/ffs.adb" ] && rmdir "$G/functions/ffs.adb" 2>/dev/null
+
+UDC=$(ls /sys/class/udc 2>/dev/null | grep -v dummy | head -1)
+[ -n "$UDC" ] || { echo "no UDC to bind"; exit 1; }
+echo "$UDC" > "$G/UDC" || { echo "UDC bind failed"; exit 1; }
+
+usbnet() {
+    ifn=$(cat "$G/functions/ncm.usb0/ifname" 2>/dev/null)
+    [ -n "$ifn" ] && [ -e "/sys/class/net/$ifn" ] || return 0
+    ip addr show dev "$ifn" | grep -q "172.16.42.1/" || ip addr add 172.16.42.1/24 dev "$ifn"
+    ip link set "$ifn" up
+}
+
+start_console
+usbnet
+echo "gadget up on $UDC (adb_ok=$adb_ok)"
+
+# Hold it.  The container's usb HAL configures a gadget of its own once it comes
+# up, and whoever writes the UDC last wins, so a one-shot setup races the
+# container and usually loses - silently, leaving no way into the device.  Watch
+# instead, and take the controller back whenever it goes.
+while :; do
+    sleep 15
+    # A logged-out/failed getty also needs recovery when USB stayed bound.
+    [ -c /dev/ttyGS0 ] && ! systemctl is-active --quiet cepheus-console && start_console
+    usbnet
+    [ -n "$(cat "$G/UDC" 2>/dev/null)" ] && continue
+    echo "lost the controller; taking it back"
+    if [ "$(cat "$ANDROID_USB/enable" 2>/dev/null)" = "1" ]; then
+        echo 0 > "$ANDROID_USB/enable" 2>/dev/null
+    fi
+    for g in "$CFG"/usb_gadget/*; do
+        [ -d "$g" ] || continue
+        [ "$g" = "$G" ] && continue
+        [ -n "$(cat "$g/UDC" 2>/dev/null)" ] && echo "" > "$g/UDC" 2>/dev/null
+    done
+    echo "$UDC" > "$G/UDC" 2>/dev/null
+    [ -c /dev/ttyGS0 ] && ! systemctl is-active --quiet cepheus-console && start_console
+done

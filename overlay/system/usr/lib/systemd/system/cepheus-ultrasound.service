@@ -1,0 +1,14 @@
+[Unit]
+Description=Elliptic ultrasound proximity: 32-bit audio HAL with a held primary output
+Documentation=file:///usr/libexec/cepheus-ultrasound
+After=lxc-android-config.service cepheus-audio-vendor.service cepheus-stop-android-audio.service user@32011.service
+Wants=cepheus-audio-vendor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/cepheus-ultrasound
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Wake the speaker when the display turns on (lock-screen key clicks)
+After=pulseaudio.service
+BindsTo=pulseaudio.service
+
+[Service]
+ExecStart=/usr/libexec/cepheus-audio-wake
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=pulseaudio.service

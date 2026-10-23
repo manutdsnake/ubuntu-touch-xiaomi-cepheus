@@ -1,0 +1,36 @@
+#!/bin/sh
+# Performance settings Android would apply and Ubuntu Touch does not.
+#
+# Touch boost: on Android the framework asks the perf HAL for a CPU boost on
+# every touch; nothing does that here and the kernel's own input boost is all
+# zeros (40 ms), so Lomiri starts every gesture from idle clocks.
+P=/sys/module/cpu_boost/parameters
+if [ -d $P ]; then
+    echo "0:1209600 4:1612800 7:1612800" > $P/input_boost_freq
+    echo 150 > $P/input_boost_ms
+fi
+# cfq is the kernel default; deadline suits UFS and is the vendor's choice.
+for q in /sys/block/sd?/queue/scheduler; do
+    grep -q deadline "$q" && echo deadline > "$q"
+done
+# Video sizes.  Android's MediaProfiles looks for media_profiles_V1_0.xml, but
+# this vendor ships media_profiles_vendor.xml and sets no pointer to it, so
+# the default profiles (H.264 up to 352x288) applied: Camera2's API1 layer
+# offered only 352x288/320x240/176x144 for video and every recording from the
+# camera app came out CIF.  Point at the vendor file and restart the services
+# that read it once (media.camera lives in minimediaservice).
+# Normally /etc/cepheus/vndservicemanager.rc sets it on early-boot and this is
+# skipped.  A runtime restart drops the user's camera trust-store connection
+# (trust-stored-skeleton then spins at ~150% CPU on the dead socket and camera
+# clients are refused), so the agent is restarted afterwards.
+A="lxc-attach -n android --"
+if [ -z "$($A /system/bin/getprop media.settings.xml)" ]; then
+    $A /system/bin/setprop media.settings.xml /vendor/etc/media_profiles_vendor.xml
+    for p in minimediaservice camera_service mediaserver32 mediaserver; do
+        pid=$($A /system/bin/pidof $p)
+        [ -n "$pid" ] && $A /system/bin/kill $pid
+    done
+    sleep 5
+    systemctl --machine=phablet@ --user try-restart cameraservice-trust-stored.service 2>/dev/null || true
+fi
+exit 0

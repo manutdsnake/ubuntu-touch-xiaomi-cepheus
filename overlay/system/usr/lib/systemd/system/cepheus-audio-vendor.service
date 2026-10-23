@@ -1,0 +1,12 @@
+[Unit]
+Description=64-bit audio HAL support for PulseAudio (ACDB, mixer paths)
+After=local-fs.target
+Before=systemd-user-sessions.service user@32011.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/cepheus-audio-vendor
+
+[Install]
+WantedBy=multi-user.target

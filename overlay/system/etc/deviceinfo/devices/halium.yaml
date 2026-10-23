@@ -1,0 +1,83 @@
+cepheus:
+    PrettyName: Xiaomi Mi 9
+    DeviceType: phone
+    GridUnit: 21
+    WebkitDpr: 2
+    SupportedOrientations:
+        - Portrait
+        - Landscape
+        - InvertedLandscape
+    # Verified on device: the panel drives /sys/class/backlight/panel0-backlight
+    # (max_brightness 2047, already at 2047 at boot).  The other node,
+    # /sys/class/backlight/backlight, reports max 4095 and stays at 0.
+    BacklightSysfsPath:
+        - /sys/class/backlight/panel0-backlight
+    # Mi 9 has a dual-LED flash.  Verified on device: torch_0 alone with
+    # switch_0 does not light - switch_0 gates both LEDs and needs torch_0 and
+    # torch_1 set together.
+    FlashlightSysfsPath:
+        - /sys/class/leds/led:torch_0/brightness
+    FlashlightSwitchPath:
+        - /sys/class/leds/led:switch_0/brightness
+    # Notification LED: one white LED (no RGB); without this hfd-service
+    # falls back to LedsDummy and notifications never light it.
+    SingleColorLedSysfsPath: /sys/class/leds/white
+    MirAndroidPlatformServerBackpressure:
+        - false
+    MirAndroidPlatformServerPartialUpdates:
+        - true
+    MirAndroidPlatformServerEglSync:
+        - false
+    MirAndroidPlatformClientEglFlush:
+        - "!/usr/bin/unity8,!/usr/bin/lomiri,all"
+    XwaylandShm:
+        - true
+    LomiriInteractiveBlur:
+        - true
+    VibrateDurationExtraMs: 40
+    # lxc-android-config's ofonod-wrapper enables ofono's modern binder plugin
+    # (HIDL android.hardware.radio@1.x via libgbinder-radio) only when this key
+    # says so; otherwise it loads the legacy ril plugin, which wants the
+    # /dev/socket/rild that Android 16's qcrild no longer provides - and ofono
+    # then has no modem at all.  Slots are named in /etc/ofono/ril_subscription.conf.
+    OfonoPlugin: binder
+    # pulseaudio-modules-droid parses the Android audio policy itself, and its
+    # reader rejects AUDIO_INPUT_FLAG_VOIP_RECORD - an enum newer than it knows -
+    # which aborts the whole parse and leaves PulseAudio with no droid card at
+    # all.  /etc/cepheus/audio_policy_configuration.xml is the vendor file with
+    # that one attribute removed and nothing else; the vendor copy is untouched,
+    # so the Android audio HAL still reads the original.  Consumed by
+    # module-droid-discover through PULSE_MODULES_DROID_EXTRA_CARD_ARGS.
+    PulseaudioModulesDroid_ExtraCardArgs:
+        - config=/etc/cepheus/audio_policy_configuration.xml
+    # Notch and corners, from LineageOS device/xiaomi/cepheus
+    # (rro_overlays/FrameworkResOverlayDevice): config_mainBuiltInDisplayCutout
+    # is a path with the origin at the centre top spanning x=-96..+96, y=0..75,
+    # which on a 1080px panel is x=444..636.  status_bar_height_portrait is
+    # 28dp; at this panel's density (2.75) that is 77px.  The outer rectangles
+    # keep indicators out of the rounded corners (radius 89px per that overlay).
+    # They only need to cover the corner at icon height: at y=38 (middle of the
+    # 77px bar) an 89px corner is inset 89 - sqrt(89^2 - 51^2) = 16px.  The full
+    # 89px wasted ~65px per side and pushed network/notification icons out of
+    # the collapsed bar.
+    CollapsedPanelHeight: 77
+    DisplayCutoutsCollapsed:
+        - 0 0 24 77
+        - 444 0 192 77
+        - 1056 0 24 77
+    # Expanded panel: only the notch.  Each expanded indicator is at least
+    # 10 gu (210 px) wide and the row skips every cutout, so with the corner
+    # rectangles too only one indicator fitted each side of the notch.
+    DisplayCutoutsExpanded:
+        - 444 0 192 77
+    # Under-display fingerprint (see /usr/libexec/cepheus-udfps).  repowerd
+    # writes this node for "high brightness mode"; it is added by our kernel
+    # (dsi_display fod_hbm: panel FOD HBM + fod_ui for the fingerprint HAL).
+    HBMSysfsPath: /sys/devices/platform/soc/soc:qcom,dsi-display-primary/fod_hbm
+    # Sensor from persist.vendor.sys.fp.udfps.location.X_Y = 455,1920 and
+    # size 173x173: centre 541,2006, radius 86.  Lomiri's DeviceConfig reads
+    # these as quint8 (max 255), so our UDFPSDimmer.qml override hardcodes them
+    # until that is fixed upstream; kept here for when it is.
+    udfpLocationX: 541
+    udfpLocationY: 2006
+    udfpSensorRadius: 86

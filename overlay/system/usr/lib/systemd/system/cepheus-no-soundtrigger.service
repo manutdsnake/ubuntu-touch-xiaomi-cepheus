@@ -1,0 +1,24 @@
+[Unit]
+Description=Hide the 32-bit sound trigger HAL from the audio service (dangling thread crashes/spins it)
+# The 32-bit android.hardware.audio.service (vendor.audio-hal, kept up for the
+# ultrasound proximity) also opens sound_trigger.primary.  Its stdev_open
+# fails here (ACDB calibration blocks already taken by PulseAudio: -12), the
+# library is released and retried, but a thread it started survives; on the
+# next USB or call routing event that thread returns into the unmapped code
+# (tombstones: SIGSEGV at ...d30, r2=100000) or into reused heap and spins at
+# 100% CPU - calls stutter, the ringing screen stays dark, SMS arrive late.
+# An empty file in its place makes the dlopen fail cleanly: no threads.
+# Sound trigger ("Hey Google" DSP hotword) is unused on Ubuntu Touch.
+DefaultDependencies=no
+After=mount-android-partitions.service halium-android-partitions.service
+Before=lxc-android-config.service
+ConditionPathExists=/var/lib/lxc/android/rootfs/vendor/lib/hw/sound_trigger.primary.msmnile.so
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mount --bind /etc/cepheus/empty /var/lib/lxc/android/rootfs/vendor/lib/hw/sound_trigger.primary.msmnile.so
+ExecStop=-/bin/umount /var/lib/lxc/android/rootfs/vendor/lib/hw/sound_trigger.primary.msmnile.so
+
+[Install]
+WantedBy=sysinit.target

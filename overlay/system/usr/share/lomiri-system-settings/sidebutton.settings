@@ -1,0 +1,22 @@
+{
+    "icon": "/usr/share/lomiri-system-settings/icons/settings-sidebutton.svg",
+    "name": "Side button",
+    "category": "personal",
+    "priority": 7,
+    "form-factors": [
+        "phone"
+    ],
+    "keywords": [
+        "side",
+        "button",
+        "assistant",
+        "ai",
+        "key",
+        "shortcut",
+        "torch",
+        "flashlight"
+    ],
+    "has-dynamic-keywords": false,
+    "has-dynamic-visibility": false,
+    "page-component": "PageComponent.qml"
+}

@@ -1,0 +1,57 @@
+diff --git a/drivers/gpu/drm/msm/dsi-staging/dsi_display.c b/drivers/gpu/drm/msm/dsi-staging/dsi_display.c
+index 4db608879..b379c19f3 100644
+--- a/drivers/gpu/drm/msm/dsi-staging/dsi_display.c
++++ b/drivers/gpu/drm/msm/dsi-staging/dsi_display.c
+@@ -5067,8 +5067,52 @@ static DEVICE_ATTR(fod_ui, 0444,
+ 			sysfs_fod_ui_read,
+ 			NULL);
+ 
++/*
++ * fod_hbm: FOD high brightness without an Android FOD layer.
++ *
++ * Normally the panel enters FOD HBM (and fod_ui, which the fingerprint HAL
++ * polls, goes to 1) when SurfaceFlinger commits a plane at the FOD z-order.
++ * Compositors that are not SurfaceFlinger (Mir/Lomiri on Ubuntu Touch) have no
++ * such plane, so let userspace drive the same two steps directly while it
++ * draws the sensor spot itself.
++ */
++static ssize_t sysfs_fod_hbm_read(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	return sysfs_fod_ui_read(dev, attr, buf);
++}
++
++static ssize_t sysfs_fod_hbm_write(struct device *dev,
++	struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct dsi_display *display = dev_get_drvdata(dev);
++	bool status;
++	int rc;
++
++	if (!display || !display->panel)
++		return -EINVAL;
++
++	rc = kstrtobool(buf, &status);
++	if (rc)
++		return rc;
++
++	mutex_lock(&display->panel->panel_lock);
++	if (display->panel->panel_initialized)
++		dsi_panel_set_fod_hbm(display->panel, status);
++	mutex_unlock(&display->panel->panel_lock);
++
++	dsi_display_set_fod_ui(display, status);
++
++	return count;
++}
++
++static DEVICE_ATTR(fod_hbm, 0644,
++			sysfs_fod_hbm_read,
++			sysfs_fod_hbm_write);
++
+ static struct attribute *display_fs_attrs[] = {
+ 	&dev_attr_fod_ui.attr,
++	&dev_attr_fod_hbm.attr,
+ 	NULL,
+ };
+ static struct attribute_group display_fs_attrs_group = {

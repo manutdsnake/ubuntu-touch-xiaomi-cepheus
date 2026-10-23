@@ -1,0 +1,22 @@
+#!/bin/sh
+# Keep the lock-screen keypad clicks: wake the speaker when the display turns on.
+#
+# PulseAudio suspends the droid sink after idle, and waking it takes ~55 ms on
+# this phone (HAL start plus the Cirrus cs35l41 unmuting).  A key click that
+# lands in that window is lost - the digit appears, the click does not - and
+# the first tap after the screen comes on is exactly such a click.  So resume
+# the sink as soon as repowerd reports the display on, and let it idle for 30 s
+# instead of 5 before suspending again, so a PIN typed at a normal pace stays on
+# an awake sink.  With the display off it still suspends after 30 s of silence.
+SINK=sink.primary_output
+
+pactl unload-module module-suspend-on-idle 2>/dev/null
+pactl load-module module-suspend-on-idle timeout=30 >/dev/null
+
+gdbus monitor --system --dest com.canonical.Unity.Screen \
+        --object-path /com/canonical/Unity/Screen 2>/dev/null |
+while read -r line; do
+    case "$line" in
+        *DisplayPowerStateChange\ \(1,*) pactl suspend-sink "$SINK" 0 2>/dev/null ;;
+    esac
+done

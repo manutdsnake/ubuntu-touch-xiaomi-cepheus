@@ -1,0 +1,13 @@
+[Unit]
+Description=cepheus performance settings (touch boost, I/O scheduler)
+After=lxc-android-config.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# after the container's own post-boot tuning has run
+ExecStartPre=/bin/sleep 20
+ExecStart=/usr/libexec/cepheus-perf
+
+[Install]
+WantedBy=multi-user.target

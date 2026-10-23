@@ -1,0 +1,96 @@
+diff --git a/src/biometry/devices/android/hidl_fingerprint_hal.cpp b/src/biometry/devices/android/hidl_fingerprint_hal.cpp
+index 8f7438b..129927a 100644
+--- a/src/biometry/devices/android/hidl_fingerprint_hal.cpp
++++ b/src/biometry/devices/android/hidl_fingerprint_hal.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include <cinttypes>
+ #include <cstdio>
++#include <sys/stat.h>
+ 
+ namespace android_hal = biometry::devices::android_hal;
+ 
+@@ -243,6 +244,25 @@ android_hal::HidlFingerprintHal::~HidlFingerprintHal()
+     gbinder_servicemanager_unref(service_manager);
+ }
+ 
++
++namespace
++{
++// Publish whether the HAL is currently waiting for a finger, for under-display
++// sensors: something outside biometryd has to light the sensor area and arm the
++// touch controller's FOD detection only while an operation is running.
++// "1" / "0" in /run/biometryd/udfps-active; watch it with inotify.
++void set_udfps_active(bool active)
++{
++    ::mkdir("/run/biometryd", 0755);
++    if (FILE* f = std::fopen("/run/biometryd/udfps-active.tmp", "w"))
++    {
++        std::fputs(active ? "1\n" : "0\n", f);
++        std::fclose(f);
++        std::rename("/run/biometryd/udfps-active.tmp", "/run/biometryd/udfps-active");
++    }
++}
++}
++
+ android_hal::FingerprintHal::Ptr android_hal::HidlFingerprintHal::probe(const std::shared_ptr<GBinderEventLoop>& loop, const GatekeeperHal::Ptr& gatekeeper)
+ {
+     GBinderServiceManager* service_manager = gbinder_servicemanager_new(GBINDER_DEFAULT_HWBINDER);
+@@ -376,7 +396,10 @@ android_hal::RequestStatus android_hal::HidlFingerprintHal::enroll(std::uint32_t
+     gbinder_writer_append_int32(&writer, gid);
+     gbinder_writer_append_int32(&writer, timeout_sec);
+ 
+-    return transact_request_status(client, fp_enroll, request);
++    auto status = transact_request_status(client, fp_enroll, request);
++    if (status == RequestStatus::sys_ok)
++        set_udfps_active(true);
++    return status;
+ }
+ 
+ android_hal::RequestStatus android_hal::HidlFingerprintHal::post_enroll()
+@@ -400,7 +423,10 @@ android_hal::RequestStatus android_hal::HidlFingerprintHal::authenticate(std::ui
+     gbinder_writer_append_int64(&writer, operation_id);
+     gbinder_writer_append_int32(&writer, gid);
+ 
+-    return transact_request_status(client, fp_authenticate, request);
++    auto status = transact_request_status(client, fp_authenticate, request);
++    if (status == RequestStatus::sys_ok)
++        set_udfps_active(true);
++    return status;
+ }
+ 
+ android_hal::RequestStatus android_hal::HidlFingerprintHal::cancel()
+@@ -409,6 +435,7 @@ android_hal::RequestStatus android_hal::HidlFingerprintHal::cancel()
+     if (dead)
+         return RequestStatus::sys_unknown;
+ 
++    set_udfps_active(false);
+     return transact_request_status(client, fp_cancel, nullptr);
+ }
+ 
+@@ -561,6 +588,8 @@ GBinderLocalReply* android_hal::HidlFingerprintHal::handle_callback(GBinderRemot
+                 gbinder_reader_read_uint32(&reader, &finger_id);
+                 gbinder_reader_read_uint32(&reader, &group_id);
+                 gbinder_reader_read_uint32(&reader, &remaining);
++                if (remaining == 0)
++                    set_udfps_active(false);
+                 if (current->on_enroll_result)
+                     current->on_enroll_result(device_id, finger_id, group_id, remaining);
+                 break;
+@@ -581,6 +610,8 @@ GBinderLocalReply* android_hal::HidlFingerprintHal::handle_callback(GBinderRemot
+                 guint32 finger_id = 0, group_id = 0;
+                 gbinder_reader_read_uint32(&reader, &finger_id);
+                 gbinder_reader_read_uint32(&reader, &group_id);
++                if (finger_id != 0)  // 0 = rejected, the HAL keeps listening
++                    set_udfps_active(false);
+                 if (current->on_authenticated)
+                     current->on_authenticated(device_id, finger_id, group_id);
+                 break;
+@@ -590,6 +621,7 @@ GBinderLocalReply* android_hal::HidlFingerprintHal::handle_callback(GBinderRemot
+                 gint32 error = 0, vendor_code = 0;
+                 gbinder_reader_read_int32(&reader, &error);
+                 gbinder_reader_read_int32(&reader, &vendor_code);
++                set_udfps_active(false);
+                 if (current->on_error)
+                     current->on_error(device_id, static_cast<FingerprintError>(error), vendor_code);
+                 break;

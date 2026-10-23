@@ -1,0 +1,12 @@
+[Unit]
+Description=Leave repowerd only the backlight that lights the panel
+Before=repowerd.service
+Wants=repowerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/cepheus-backlight
+
+[Install]
+WantedBy=multi-user.target

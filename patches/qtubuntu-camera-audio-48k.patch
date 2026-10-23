@@ -1,0 +1,16 @@
+diff --git a/src/aalmediarecordercontrol.cpp b/src/aalmediarecordercontrol.cpp
+index 99a8f3a..9db364b 100644
+--- a/src/aalmediarecordercontrol.cpp
++++ b/src/aalmediarecordercontrol.cpp
+@@ -466,7 +466,10 @@ int AalMediaRecorderControl::startRecording()
+     // FIXME get data from a new AalAudioEncoderSettingsControl
+     setParameter(PARAM_AUDIO_BITRATE, 48000);
+     setParameter(PARAM_AUDIO_CHANNELS, 2);
+-    setParameter(PARAM_AUTIO_SAMPLING, 96000);
++    // 96 kHz is rejected by AudioRecordHybris ("Unsupported configuration:
++    // sampleRate 96000") and the whole recording fails; AAC at 48 kHz is
++    // what every Android camcorder profile uses.
++    setParameter(PARAM_AUTIO_SAMPLING, 48000);
+ 
+     int rotation = m_service->rotationHandler()->calculateRotation();
+     setParameter(PARAM_ORIENTATION, rotation);

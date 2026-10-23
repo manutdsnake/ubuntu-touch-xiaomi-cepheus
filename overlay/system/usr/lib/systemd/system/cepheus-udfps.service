@@ -1,0 +1,11 @@
+[Unit]
+Description=Under-display fingerprint glue (FOD touch, HBM, sensor spot)
+After=repowerd.service biometryd.service
+
+[Service]
+ExecStart=/usr/libexec/cepheus-udfps
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

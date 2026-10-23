@@ -1,0 +1,84 @@
+# Xiaomi Mi 9 (cepheus) - Ubuntu Touch 24.04 on Halium 16
+#
+# Base: crDroid 16 (Android 16) vendor and firmware on the phone, retrofit
+# dynamic partitions (super spread over the physical system and vendor
+# partitions). Kernel: LineageOS lineage-22.2 sm8150 plus this port's commits.
+
+deviceinfo_name="Mi 9"
+deviceinfo_manufacturer="Xiaomi"
+deviceinfo_codename="cepheus"
+deviceinfo_arch="aarch64"
+
+deviceinfo_halium_version="16"
+deviceinfo_ubuntu_touch_release="24.04-2.x"
+
+# Halium 16 on a crDroid 16 (Android 16) base. The MIUI 12.0.5 route was a dead
+# end: its TrustZone image and our 4.14.356 kernel disagree, qseecomd resets the
+# SoC, and without it there is no keymaster and so no display. crDroid runs its
+# own 4.14.355-openela kernel with its own device tree on this phone, which is the
+# same tree ours comes from - so kernel, DTB, dtbo and vendor finally match.
+# The port's kernel fork: LineageOS lineage-22.2 plus the port's commits on
+# branch halium-16-cepheus (the build tools clone, they do not patch).
+deviceinfo_kernel_source="https://github.com/manutdsnake/android_kernel_xiaomi_sm8150"
+deviceinfo_kernel_source_branch="halium-16-cepheus"
+deviceinfo_kernel_defconfig="cepheus_halium_defconfig"
+deviceinfo_kernel_clang_compile="true"
+# The LineageOS 4.14.356 tree needs a newer clang than halium 10's default
+# (r353983c, clang 9), which fails the -fstack-protector-strong probe outright.
+deviceinfo_kernel_clang_branch="main-kernel-build-2023"
+deviceinfo_kernel_clang_revision="r487747c"
+# A modern clang emits assembly the GCC 4.9 prebuilt's GNU as cannot parse, so
+# use LLVM's own assembler and binutils throughout, as LineageOS does.
+deviceinfo_kernel_llvm_compile="true"
+deviceinfo_kernel_use_dtc_ext="true"
+
+# The four sm8150 base DTBs are appended to the kernel and the cepheus overlay
+# goes in the dtbo partition, which is how crDroid does it. Pairing our base DTB
+# with someone else's dtbo is what the bootloader refuses - not custom DTBs as
+# such, which is what the MIUI attempt made it look like.
+deviceinfo_kernel_apply_overlay="false"
+# The bootloader only takes Image-dtb: Qualcomm's UNCOMPRESSED_IMG container,
+# the raw Image and the four base DTBs (CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES).
+# A plain Image goes straight back to fastboot.
+deviceinfo_kernel_image_name="Image-dtb"
+deviceinfo_dtbo="qcom/cepheus-sm8150-overlay.dtbo"
+
+# From LineageOS device/xiaomi/sm8150-common/BoardConfigCommon.mk (the non-VAB,
+# Android 11 path) plus the halium/UT additions.
+deviceinfo_kernel_cmdline="androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 security=apparmor selinux=0 enforcing=0 androidboot.selinux=permissive systemd.unified_cgroup_hierarchy=0 systempart=/dev/mapper/system"
+
+# Header v1, not the v2 that LineageOS sm8150-common suggests: that value belongs
+# to its Android 12+ (TARGET_IS_VAB) path, while the Android 10 stock boot.img on
+# this device is v1 with the DTB appended to the kernel rather than carried in a
+# separate section. Flashing a v2 image left the phone sitting at the Mi logo
+# with no USB at all.
+deviceinfo_bootimg_header_version="1"
+deviceinfo_bootimg_os_version="10"
+deviceinfo_bootimg_os_patch_level="2021-04-01"
+deviceinfo_bootimg_qcdt="false"
+deviceinfo_bootimg_partition_size="134217728"
+deviceinfo_flash_pagesize="4096"
+deviceinfo_flash_offset_base="0x00000000"
+deviceinfo_flash_offset_kernel="0x00008000"
+deviceinfo_flash_offset_ramdisk="0x01000000"
+deviceinfo_flash_offset_second="0x00f00000"
+deviceinfo_flash_offset_tags="0x00000100"
+deviceinfo_flash_offset_dtb="0x01f00000"
+
+# halium's dynparts ramdisk plus initramfs-overlay/ (retrofit dynamic
+# partitions, e2fsprogs 1.47): tools/build-initramfs.sh.
+deviceinfo_prebuilt_boot_ramdisk="ramdisk/halium-boot-ramdisk.img"
+
+deviceinfo_has_recovery_partition="true"
+deviceinfo_use_unified_recovery="true"
+deviceinfo_unified_recovery_ui_density="xxhdpi"
+
+# The rootfs (24.04 + Halium 16 GSI, ~3.2 GiB) goes into the logical system
+# partition of the retrofit super (systempart=/dev/mapper/system): on the first
+# install the recovery drops the ROM's product/system_ext and grows system.
+deviceinfo_system_partition_size="4096M"
+deviceinfo_rootfs_image_sector_size="4096"
+
+# No overlaystore: the device tarball's system/ is unpacked straight into the
+# rootfs (install and every OTA), so units, .wants links and replaced files
+# behave like any packaged file.

@@ -1,0 +1,43 @@
+diff --git a/drivers/input/misc/qti-haptics.c b/drivers/input/misc/qti-haptics.c
+index 1eec6ae72..371639e36 100644
+--- a/drivers/input/misc/qti-haptics.c
++++ b/drivers/input/misc/qti-haptics.c
+@@ -896,6 +896,30 @@ static int qti_haptics_upload_effect(struct input_dev *dev,
+ 		}
+ 		break;
+ 
++	case FF_RUMBLE:
++		/*
++		 * Ubuntu Touch's hfd-service only ever uploads FF_RUMBLE.  The
++		 * input core would otherwise turn that into a sine FF_PERIODIC,
++		 * which this driver rejects ("Only accept custom waveforms"),
++		 * so nothing ever vibrates.  A rumble is a constant effect with
++		 * the magnitude as its level; play it as one.
++		 */
++		play->length_us = effect->replay.length * USEC_PER_MSEC;
++		tmp = effect->u.rumble.strong_magnitude;
++		if (tmp == 0)
++			tmp = effect->u.rumble.weak_magnitude;
++		play->vmax_mv = ((u32)tmp * config->vmax_mv) / 0xffff;
++		dev_dbg(chip->dev, "upload rumble effect, length = %dus, vmax_mv=%d\n",
++				play->length_us, play->vmax_mv);
++
++		rc = qti_haptics_load_constant_waveform(chip);
++		if (rc < 0) {
++			dev_err(chip->dev, "Play rumble waveform failed, rc=%d\n",
++					rc);
++			return rc;
++		}
++		break;
++
+ 	case FF_PERIODIC:
+ 		if (chip->effects_count == 0)
+ 			return -EINVAL;
+@@ -1992,6 +2016,7 @@ static int qti_haptics_probe(struct platform_device *pdev)
+ 
+ 	input_set_capability(input_dev, EV_FF, FF_CONSTANT);
+ 	input_set_capability(input_dev, EV_FF, FF_GAIN);
++	input_set_capability(input_dev, EV_FF, FF_RUMBLE);
+ 	if (chip->effects_count != 0) {
+ 		input_set_capability(input_dev, EV_FF, FF_PERIODIC);
+ 		input_set_capability(input_dev, EV_FF, FF_CUSTOM);

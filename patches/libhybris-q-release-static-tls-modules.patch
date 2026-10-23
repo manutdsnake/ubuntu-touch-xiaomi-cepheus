@@ -1,0 +1,18 @@
+--- a/hybris/common/q/linker_tls.cpp
++++ b/hybris/common/q/linker_tls.cpp
+@@ -90,7 +90,14 @@
+ 
+   soinfo_tls* si_tls = si->get_tls();
+   TlsModule& mod = g_tls_modules[__tls_module_id_to_idx(si_tls->module_id)];
+-  CHECK(mod.static_offset == SIZE_MAX);
++  // Under libhybris there is no linker_main(), so linker_finalize_static_tls()
++  // never runs and every TLS module - including ones dlopen()ed long after
++  // start-up - is registered with a static offset.  Bionic assumes static
++  // modules are never unloaded and CHECKs for it here, but hybris unloads them
++  // on dlclose() and at exit, so every process that loaded one aborted in its
++  // teardown (getprop, device-info, PulseAudio's module fallback...).  The
++  // static layout is a bump allocation that is never reused, so releasing the
++  // module slot cannot hand the same offset to another module.
+   CHECK(mod.soinfo_ptr == si);
+   mod = {};
+   si_tls->module_id = kTlsUninitializedModuleId;

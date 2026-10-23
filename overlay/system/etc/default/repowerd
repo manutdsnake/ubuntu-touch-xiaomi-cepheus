@@ -1,0 +1,4 @@
+# The Android lights HAL does not drive this panel through repowerd - the
+# brightness slider moves and nothing happens - so use the sysfs backend, which
+# writes /sys/class/backlight/panel0-backlight directly. Same as on dipper.
+REPOWERD_BACKLIGHT_BACKEND=sysfs

@@ -1,0 +1,48 @@
+#!/bin/sh
+# Give PulseAudio's in-process 64-bit audio HAL what the vendor image lacks.
+#
+# The ROM runs audio as a 32-bit HAL (android.hardware.audio.service with
+# Xiaomi's audio.primary.cepheus.so).  PulseAudio loads the 64-bit
+# /vendor/lib64/hw/audio.primary.msmnile.so instead, which was built without:
+#  - ACDB calibration: no 64-bit libacdbloader & co. on this vendor.  The
+#    Pixel 4 (coral, same SM8150) ones load cepheus' Forte_*.acdb files fine
+#    (ACDB SW 10.0.17), but that loader looks for card files in /vendor/etc.
+#  - correct mixer paths: the generic msmnile names it picks point at DMICs
+#    and a WSA speaker; the Mi 9 has analog mics (ADC3 bottom, ADC1 top) and
+#    the earpiece on the codec EAR output.  Fixed copy of mixer_paths_tavil.xml.
+#  - a backend for SND_DEVICE_OUT_VOICE_SPEAKER_STEREO, the voice speaker device
+#    the 64-bit HAL picks: audio_platform_info.xml with one added line.
+# Read-only overlays on the host's /android/vendor.  Mount propagation carries
+# them into the container's /vendor too (on top of the binds made before the
+# container started), so anything bound under /vendor/etc must also be here.
+set -e
+L=/usr/lib/cepheus
+V=/android/vendor
+
+if ! grep -q " $V/lib64 overlay " /proc/mounts; then
+    mount -t overlay overlay -o "lowerdir=$L/vendor-lib64:$V/lib64" "$V/lib64"
+fi
+
+if ! grep -q " $V/etc overlay " /proc/mounts; then
+    E=/run/cepheus-vendor-etc
+    mkdir -p "$E"
+    cp "$V"/etc/acdbdata/Forte/*.acdb "$E"/
+    cp "$L/vendor-etc/mixer_paths_tavil.xml" "$E"/
+    # Voice speaker backend mapping for the stereo voice device (speakerphone).
+    cp "$L/vendor-etc/audio_platform_info.xml" "$E"/
+    # Quiet CamX logging, see cepheus-camx-settings.service.
+    if [ -f /etc/cepheus/camxoverridesettings.txt ]; then
+        mkdir -p "$E/camera"
+        cp /etc/cepheus/camxoverridesettings.txt "$E/camera/"
+        chmod 0755 "$E/camera"; chmod 0644 "$E/camera/camxoverridesettings.txt"
+    fi
+    chmod 0644 "$E"/*.acdb "$E"/*.xml
+    mount -t overlay overlay -o "lowerdir=$E:$V/etc" "$V/etc"
+fi
+
+# ueventd never applies the vendor rules here; the ACDB loader in PulseAudio
+# (user phablet, group audio) needs these.
+for n in msm_audio_cal msm_rtac msm_hweffects; do
+    [ -e /dev/$n ] && chgrp audio /dev/$n && chmod 0660 /dev/$n
+done
+exit 0
