@@ -31,8 +31,6 @@ device yet.
 
 Known issues:
 
-- The audio HAL can crash (for example when unplugging USB); the microphone in
-  calls is then silent until the next reboot.
 - While the camera is open the journal gets a lot of harmless
   "SELinux is disabled, skipping restorecon" lines.
 
