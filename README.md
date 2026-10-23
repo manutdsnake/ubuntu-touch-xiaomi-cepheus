@@ -14,7 +14,7 @@ device yet.
 | Display, touch, brightness, rotation, notch-aware status bar | works |
 | Calls, both SIM slots (dual SIM DSDS), call audio, speakerphone | works |
 | Mobile data | works |
-| SMS (incl. SMS over IMS) | not fully tested |
+| SMS | works |
 | Wi-Fi, Bluetooth | works |
 | Speaker, earpiece, microphone | works |
 | Cameras (photo and video, lens switching) and torch | works |
@@ -26,7 +26,7 @@ device yet.
 | Waydroid (Android apps) | works |
 | MTP and ADB over USB | works |
 | Battery, charging, suspend (about 0.5 %/h idle with the screen off) | works |
-| GPS | not tested |
+| GPS | works |
 | Updates from System Settings | not available - see [Updating](#updating) |
 
 Known issues:
